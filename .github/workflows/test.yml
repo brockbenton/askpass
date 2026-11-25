@@ -10,12 +10,12 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: python3 test_askpass.py
       - name: Require a password from here on, then smoke test
         run: |
-          echo "$(id -un) ALL=(ALL) PASSWD: ALL" | sudo tee /etc/sudoers.d/zzz-askpass-test
-          sudo chmod 440 /etc/sudoers.d/zzz-askpass-test
+          echo "$(id -un) ALL=(ALL) PASSWD: ALL" > "$RUNNER_TEMP/rule"
+          sudo install -m 440 "$RUNNER_TEMP/rule" /etc/sudoers.d/zzz-askpass-test
           sudo -k
           ./ci-smoke.sh
   distros:
@@ -35,7 +35,7 @@ jobs:
             setup: zypper -n install python3 sudo shadow util-linux
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: >
           docker run --rm -v "$PWD:/src:ro" ${{ matrix.image }} sh -ec
           '${{ matrix.setup }};

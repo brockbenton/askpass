@@ -52,8 +52,10 @@ class Askpass(unittest.TestCase):
         self.assertEqual(a.visible("a\nb\u202ec"), "a\\nb\\u202ec")
 
     def test_reads_a_real_process(self):
-        p = subprocess.Popen([sys.executable, "-c", "input()", "marker"], stdin=subprocess.PIPE)
+        p = subprocess.Popen([sys.executable, "-c", "print(flush=True); input()", "marker"],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         try:
+            p.stdout.readline()  # wait until it is really running
             self.assertIn("marker", a.cmdline(p.pid)[1])
             self.assertEqual(a.status(p.pid)[1], os.getpid())
         finally:
