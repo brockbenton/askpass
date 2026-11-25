@@ -37,9 +37,6 @@ echo "Path askpass /usr/local/bin/askpass" | sudo tee -a /etc/sudo.conf
 | Linux, classic sudo | `sudo.conf` line or wrapper |
 | Linux, sudo-rs 0.2.11+ | Wrapper only: sudo-rs has no automatic fallback |
 | macOS | Wrapper |
-| WSL2 with WSLg | Should work like Linux, not tested |
-| FreeBSD, NixOS | Not supported yet |
-| Plain SSH, native Windows, doas | No |
 
 ## See what your agents asked for
 
