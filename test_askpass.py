@@ -2,6 +2,7 @@ import importlib.machinery
 import importlib.util
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -16,10 +17,11 @@ loader.exec_module(a)
 
 
 class Askpass(unittest.TestCase):
-    def go(self, argv, allow=True, password=b"s3cret\n"):
+    def go(self, command, allow=True, password=b"s3cret\n"):
         out = types.SimpleNamespace(buffer=io.BytesIO())
         self.log = []
-        with mock.patch.object(a, "cmdline", return_value=argv), \
+        with mock.patch.object(a, "cmdline", return_value=(command.split(" ")[0], command)), \
+             mock.patch.object(a, "ZENITY", "/usr/bin/zenity"), \
              mock.patch.object(a, "confirm", return_value=allow) as self.confirm, \
              mock.patch.object(a, "ask_password", return_value=password) as self.ask, \
              mock.patch.object(a, "log", lambda *x: self.log.append(x)), \
@@ -28,31 +30,45 @@ class Askpass(unittest.TestCase):
             return a.main(), out.buffer.getvalue()
 
     def test_allow(self):
-        self.assertEqual(self.go(["sudo", "tee", "/a b"]), (0, b"s3cret\n"))
+        self.assertEqual(self.go("sudo tee '/a b'"), (0, b"s3cret\n"))
         self.assertEqual(self.log[0][0], "allowed")
         self.assertEqual(self.log[0][2], "sudo tee '/a b'")
         self.assertNotIn("s3cret", str(self.log))
 
     def test_block_never_asks_password(self):
-        self.assertEqual(self.go(["sudo", "true"], allow=False), (1, b""))
+        self.assertEqual(self.go("sudo true", allow=False), (1, b""))
         self.ask.assert_not_called()
 
     def test_cancel(self):
-        self.assertEqual(self.go(["sudo", "true"], password=None), (1, b""))
+        self.assertEqual(self.go("sudo true", password=None), (1, b""))
         self.assertEqual(self.log[0][0], "cancelled")
 
     def test_not_sudo_and_too_long(self):
-        for argv in ([], ["bash"], ["sudo", "x" * 5000]):
-            self.assertEqual(self.go(argv), (1, b""))
+        for command in ("", "bash", "sudo " + "x" * 5000):
+            self.assertEqual(self.go(command), (1, b""))
             self.confirm.assert_not_called()
 
     def test_hidden_characters_are_shown(self):
-        self.go(["sudo", "a\nb‮c"])
-        self.assertNotIn("\n", self.log[0][2])
-        self.assertNotIn("‮", self.log[0][2])
+        self.assertEqual(a.visible("a\nb\u202ec"), "a\\nb\\u202ec")
+
+    def test_reads_a_real_process(self):
+        p = subprocess.Popen([sys.executable, "-c", "input()", "marker"], stdin=subprocess.PIPE)
+        try:
+            self.assertIn("marker", a.cmdline(p.pid)[1])
+            self.assertEqual(a.status(p.pid)[1], os.getpid())
+        finally:
+            p.communicate(b"\n")
+
+    def test_osascript_text_is_not_source(self):
+        with mock.patch.object(a, "OSASCRIPT", "osascript"), \
+             mock.patch.object(a, "run", return_value=b"") as run:
+            a.confirm(["x"], 'sudo "evil', "/")
+        argv = run.call_args[0][0]
+        self.assertTrue(all("evil" not in x for x in argv[:-1]))
 
     def test_kdialog_markup_is_escaped(self):
-        with mock.patch.object(a.os, "access", return_value=True), \
+        with mock.patch.object(a, "OSASCRIPT", None), \
+             mock.patch.object(a, "KDIALOG", "kdialog"), \
              mock.patch.object(a, "run", return_value=b"") as run:
             a.confirm(["x"], "sudo '<b>hi' \\n", "/")
         text = run.call_args[0][0][-1]

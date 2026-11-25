@@ -8,8 +8,19 @@ import subprocess
 import sys
 import time
 
-KDIALOG = "/usr/bin/kdialog"
-ZENITY = "/usr/bin/zenity"
+
+def find(name):
+    # Fixed directories, not $PATH, which the caller controls.
+    for d in ("/usr/bin", "/bin", "/usr/local/bin", "/run/current-system/sw/bin"):
+        if os.access(os.path.join(d, name), os.X_OK):
+            return os.path.join(d, name)
+    return None
+
+
+OSASCRIPT = find("osascript") if sys.platform == "darwin" else None
+KDIALOG = find("kdialog")
+ZENITY = find("zenity")
+SUDO_NAMES = ("sudo", "sudo-rs", "sudo.ws", "sudoedit")
 TIMEOUT = 120          # seconds per dialog, then treated as cancelled
 MAX_COMMAND = 2000     # longer commands are blocked: never approve what can't be shown
 
@@ -19,16 +30,31 @@ def visible(text):
     return "".join(c if c.isprintable() else c.encode("unicode_escape").decode() for c in text)
 
 
+def ps(pid, field):
+    return subprocess.run(["/bin/ps", "-ww", "-o", field + "=", "-p", str(pid)],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                          check=True).stdout.decode(errors="replace").strip()
+
+
 def cmdline(pid):
-    with open(f"/proc/{pid}/cmdline", "rb") as f:
-        raw = f.read()
-    return [os.fsdecode(a) for a in raw.rstrip(b"\0").split(b"\0")] if raw else []
+    """Return (program name, printable command)."""
+    if sys.platform.startswith("linux"):
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            raw = f.read()
+        argv = [os.fsdecode(a) for a in raw[:-1].split(b"\0")] if raw else [""]
+        return os.path.basename(argv[0]), visible(" ".join(shlex.quote(a) for a in argv))
+    # ps joins the arguments with spaces, so quoting is lost here.
+    command = ps(pid, "args")
+    return os.path.basename(command.split(" ")[0]), visible(command)
 
 
 def status(pid):
-    with open(f"/proc/{pid}/status", errors="replace") as f:
-        fields = dict(line.rstrip("\n").split(":\t", 1) for line in f if ":\t" in line)
-    return fields["Name"], int(fields["PPid"])
+    """Return (name, parent pid)."""
+    if sys.platform.startswith("linux"):
+        with open(f"/proc/{pid}/status", errors="replace") as f:
+            fields = dict(line.rstrip("\n").split(":\t", 1) for line in f if ":\t" in line)
+        return fields["Name"], int(fields["PPid"])
+    return os.path.basename(ps(pid, "comm")), int(ps(pid, "ppid"))
 
 
 def requesters(sudo_pid):
@@ -39,7 +65,7 @@ def requesters(sudo_pid):
         while pid > 1 and len(names) < 8:
             name, pid = status(pid)
             names.append(visible(name))
-    except (OSError, KeyError, ValueError):
+    except (OSError, KeyError, ValueError, subprocess.SubprocessError):
         pass
     return names or ["unknown"]
 
@@ -67,7 +93,15 @@ def run(argv):
 
 def confirm(names, command, cwd):
     who = " < ".join(names)
-    if os.access(KDIALOG, os.X_OK):
+    if OSASCRIPT:
+        text = f"A program wants to run as root:\n\n{command}\n\nAsked by: {who}\nIn: {cwd}"
+        # Text goes in as an argument, never as AppleScript source.
+        return run([OSASCRIPT, "-e", "on run argv",
+                    "-e", 'display dialog (item 1 of argv) with title "askpass" '
+                          'buttons {"Block", "Allow"} default button "Block" '
+                          'cancel button "Block" with icon caution',
+                    "-e", "end run", text]) is not None
+    if KDIALOG:
         # kdialog renders HTML and expands backslashes, so neutralise both.
         esc = lambda s: html.escape(s).replace("\\", "&#92;")
         text = (f"<qt><p>A program wants to run as root:</p><p><b><code>{esc(command)}</code></b></p>"
@@ -81,7 +115,10 @@ def confirm(names, command, cwd):
 
 
 def ask_password():
-    if os.access(KDIALOG, os.X_OK):
+    if OSASCRIPT:
+        return run([OSASCRIPT, "-e", 'text returned of (display dialog "Password for sudo:" '
+                    'with title "askpass" default answer "" with hidden answer)'])
+    if KDIALOG:
         return run([KDIALOG, "--title", "askpass", "--password", "Password for sudo:"])
     return run([ZENITY, "--password", "--title=askpass: password for sudo"])
 
@@ -89,11 +126,9 @@ def ask_password():
 def main():
     sudo_pid = os.getppid()
     try:
-        argv = cmdline(sudo_pid)
-    except OSError:
-        argv = []
-    command = " ".join(shlex.quote(a) for a in argv)
-    command = visible(command)
+        program, command = cmdline(sudo_pid)
+    except (OSError, subprocess.SubprocessError):
+        program, command = "", ""
     names = requesters(sudo_pid)
     cwd = visible(os.getcwd())
 
@@ -103,11 +138,11 @@ def main():
             print(f"askpass: {message}", file=sys.stderr)
         return 1
 
-    if not argv or os.path.basename(argv[0]) != "sudo":
+    if program not in SUDO_NAMES:
         return refuse("blocked", "not called by sudo, refusing")
     if len(command) > MAX_COMMAND:
         return refuse("blocked", "command is too long to show in full, refusing")
-    if not (os.access(KDIALOG, os.X_OK) or os.access(ZENITY, os.X_OK)):
+    if not (OSASCRIPT or KDIALOG or ZENITY):
         return refuse("blocked", "install kdialog or zenity")
     if not confirm(names, command, cwd):
         return refuse("blocked", "request was blocked or timed out")

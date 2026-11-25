@@ -1,0 +1,44 @@
+name: test
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 test_askpass.py
+      - name: Require a password from here on, then smoke test
+        run: |
+          echo "$(id -un) ALL=(ALL) PASSWD: ALL" | sudo tee /etc/sudoers.d/zzz-askpass-test
+          sudo chmod 440 /etc/sudoers.d/zzz-askpass-test
+          sudo -k
+          ./ci-smoke.sh
+  distros:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:stable
+            setup: apt-get update && apt-get install -y python3 sudo
+          - image: ubuntu:26.04
+            setup: apt-get update && apt-get install -y python3 sudo
+          - image: fedora:latest
+            setup: dnf install -y python3 sudo util-linux
+          - image: archlinux:latest
+            setup: pacman -Syu --noconfirm python sudo
+          - image: opensuse/tumbleweed
+            setup: zypper -n install python3 sudo shadow util-linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: >
+          docker run --rm -v "$PWD:/src:ro" ${{ matrix.image }} sh -ec
+          '${{ matrix.setup }};
+          useradd -m tester; echo "tester ALL=(ALL) ALL" > /etc/sudoers.d/tester; chmod 440 /etc/sudoers.d/tester;
+          cp -r /src /home/tester/src; chown -R tester /home/tester/src;
+          su tester -c "cd /home/tester/src && python3 test_askpass.py && ./ci-smoke.sh"'

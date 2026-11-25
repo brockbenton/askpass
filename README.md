@@ -6,42 +6,40 @@ pops up a dialog showing the exact command and which program asked for it, and
 only gets your password if you click **Allow**. Every request is logged, without
 the password.
 
-## Setup (about 2 minutes)
+## Setup
 
-1. **Make sure you have a dialog tool.** GNOME usually ships `zenity`; KDE ships `kdialog`.
+Needs `python3`, and on Linux `kdialog` or `zenity`. On a Mac, get python3 with
+`xcode-select --install`; dialogs are built in. In a normal terminal:
 
-   ```bash
-   command -v zenity || command -v kdialog || sudo apt install zenity
-   ```
+```bash
+./install.sh
+```
 
-2. **Install the script.** It goes in a root-owned directory so that agents running
-   as you can't edit it. You also need `python3`. Run this and the next step in a
-   normal terminal:
+It installs root-owned files, so agents running as you can't edit them, and prints one
+line to add to your shell config. That puts a small `sudo` wrapper first in your PATH,
+which uses the dialog only when there is no terminal. Restart your agent, then test from
+a normal terminal:
 
-   ```bash
-   sudo install -m 755 askpass /usr/local/bin/askpass
-   ```
+```bash
+sudo -k; SUDO_ASKPASS=/usr/local/bin/askpass sudo -A true && echo "it works"
+```
 
-3. **Tell sudo to use it.** This adds one line to `/etc/sudo.conf`, which works for
-   every program, including agents:
+**Linux with classic sudo** can skip the wrapper with one system-wide line instead:
 
-   ```bash
-   echo "Path askpass /usr/local/bin/askpass" | sudo tee -a /etc/sudo.conf
-   ```
+```bash
+echo "Path askpass /usr/local/bin/askpass" | sudo tee -a /etc/sudo.conf
+```
 
-   Alternative: set `SUDO_ASKPASS=/usr/local/bin/askpass` in your shell's config and
-   restart your agent from a new terminal.
+## Where it works
 
-4. **Test it.** This runs sudo detached from your terminal, the way an agent does:
-
-   ```bash
-   sudo -k && setsid -w sudo true < /dev/null && echo "it works"
-   ```
-
-   The dialog should appear. Click Allow, enter your password, and you'll see "it works".
-
-Your agent's `sudo` commands, like the battery threshold one, will now show the dialog
-instead of failing.
+| System | How |
+| --- | --- |
+| Linux, classic sudo | `sudo.conf` line or wrapper |
+| Linux, sudo-rs 0.2.11+ | Wrapper only: sudo-rs has no automatic fallback |
+| macOS | Wrapper |
+| WSL2 with WSLg | Should work like Linux, not tested |
+| FreeBSD, NixOS | Not supported yet |
+| Plain SSH, native Windows, doas | No |
 
 ## See what your agents asked for
 
@@ -51,3 +49,7 @@ cat ~/.local/state/askpass/requests.log
 
 Each line has the time, the decision (allowed, blocked or cancelled), which programs
 asked, and the command.
+
+## License
+
+MIT

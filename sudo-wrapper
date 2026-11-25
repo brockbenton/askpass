@@ -1,0 +1,18 @@
+#!/bin/sh
+# askpass sudo wrapper: use the askpass dialog when there is no terminal.
+for real in /usr/bin/sudo /usr/local/bin/sudo /run/wrappers/bin/sudo; do
+    # Never exec ourselves.
+    [ -x "$real" ] && ! [ "$real" -ef "$0" ] && break
+    real=
+done
+[ -n "$real" ] || { echo "askpass: sudo not found" >&2; exit 127; }
+if (: </dev/tty) 2>/dev/null; then exec "$real" "$@"; fi
+# Leave -S (password on stdin) and -n (never ask) alone.
+case "${1-}" in
+    --stdin|--non-interactive) exec "$real" "$@" ;;
+    --*) ;;
+    -*[Sn]*) exec "$real" "$@" ;;
+esac
+SUDO_ASKPASS=${SUDO_ASKPASS:-/usr/local/bin/askpass}
+export SUDO_ASKPASS
+exec "$real" -A "$@"
