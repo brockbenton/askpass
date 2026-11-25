@@ -51,23 +51,3 @@ cat ~/.local/state/askpass/requests.log
 
 Each line has the time, the decision (allowed, blocked or cancelled), which programs
 asked, and the command.
-
-## Good to know
-
-- **It needs a desktop session.** sudo only uses the helper when `DISPLAY` or
-  `WAYLAND_DISPLAY` is set. Over plain SSH it still fails.
-- **sudo may remember an approval for a few minutes,** so later sudo commands from the
-  same session can run without a dialog. To be asked every time, run
-  `sudo visudo -f /etc/sudoers.d/askpass` and add `Defaults timestamp_timeout=0`.
-  This also makes your own terminal ask every time.
-- **Only enter your password in a dialog you expected.** Read the command before
-  clicking Allow.
-- **It shows sudo's arguments, not piped input.** For `echo 96 | sudo tee FILE` you
-  see `sudo tee FILE`, not the `96`. Likewise, it shows a script's name, not its contents.
-- **It stops surprises, not malware.** A hostile program running as you can set its own
-  `SUDO_ASKPASS` or fake a dialog. The program names shown can be faked too.
-- **Dialogs time out after 2 minutes** and commands over 2000 characters are blocked,
-  because they can't be shown in full.
-- **The log contains command arguments,** so don't put secrets in them.
-- **To uninstall,** delete the `Path askpass` line from `/etc/sudo.conf` (or the
-  `SUDO_ASKPASS` export) and remove `/usr/local/bin/askpass`.
